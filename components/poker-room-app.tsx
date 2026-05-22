@@ -6,11 +6,14 @@ import {
   ArrowUp,
   Check,
   Copy,
+  History,
   Landmark,
+  Eye,
   Plus,
   Receipt,
   RotateCcw,
   Share2,
+  Trash2,
   Users
 } from "lucide-react";
 
@@ -32,7 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { getCurrencyOptions } from "@/lib/currencies";
 import { buildSettlementShareText, computeSettlement, validateGameState } from "@/lib/game";
 import { formatChipCount, formatCurrency } from "@/lib/format";
-import { BuyInRule, Player } from "@/lib/types";
+import { ArchivedGame, BuyInRule, Player } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useGameStore } from "@/store/use-game-store";
 
@@ -61,6 +64,7 @@ function FieldRow({ children }: { children: React.ReactNode }) {
 function CurrencyPicker() {
   const currency = useGameStore((state) => state.game.currency);
   const setGameMeta = useGameStore((state) => state.setGameMeta);
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const currencies = useMemo(() => getCurrencyOptions("en"), []);
 
@@ -70,7 +74,7 @@ function CurrencyPicker() {
   });
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" className="w-full justify-between rounded-2xl">
           <span>{currencies.find((item) => item.code === currency)?.symbol} {currency}</span>
@@ -91,7 +95,11 @@ function CurrencyPicker() {
               <button
                 key={option.code}
                 type="button"
-                onClick={() => setGameMeta({ currency: option.code })}
+                onClick={() => {
+                  setGameMeta({ currency: option.code });
+                  setQuery("");
+                  setOpen(false);
+                }}
                 className={cn(
                   "w-full rounded-2xl border px-4 py-3 text-left transition",
                   option.code === currency
@@ -121,6 +129,7 @@ function RuleDialog({
   onSave: (rule: Omit<BuyInRule, "id">) => void;
   trigger: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   const [label, setLabel] = useState(rule?.label ?? "");
   const [cashAmount, setCashAmount] = useState(String(rule?.cashAmount ?? ""));
   const [chipsReceived, setChipsReceived] = useState(String(rule?.chipsReceived ?? ""));
@@ -132,7 +141,7 @@ function RuleDialog({
   }, [rule]);
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -170,13 +179,23 @@ function RuleDialog({
           </FieldRow>
           <Button
             className="w-full"
-            onClick={() =>
-              onSave({
+            onClick={() => {
+              const payload = {
                 label: label.trim() || "Buy-In",
                 cashAmount: Number(cashAmount) || 0,
                 chipsReceived: Number(chipsReceived) || 0
-              })
-            }
+              };
+              if (payload.cashAmount <= 0 || payload.chipsReceived <= 0) {
+                return;
+              }
+              onSave(payload);
+              setOpen(false);
+              if (mode === "create") {
+                setLabel("");
+                setCashAmount("");
+                setChipsReceived("");
+              }
+            }}
           >
             Save rule
           </Button>
@@ -195,6 +214,7 @@ function PlayerDialog({
   onSave: (name: string) => void;
   trigger: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState(player?.name ?? "");
 
   useEffect(() => {
@@ -202,7 +222,7 @@ function PlayerDialog({
   }, [player]);
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -220,9 +240,102 @@ function PlayerDialog({
               placeholder="Sachin"
             />
           </div>
-          <Button className="w-full" onClick={() => onSave(name.trim())}>
+          <Button
+            className="w-full"
+            onClick={() => {
+              const nextName = name.trim();
+              if (!nextName) {
+                return;
+              }
+              onSave(nextName);
+              setOpen(false);
+              if (!player) {
+                setName("");
+              }
+            }}
+          >
             Save player
           </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GameHistoryDialog({ archivedGame }: { archivedGame: ArchivedGame }) {
+  const loadHistoryGame = useGameStore((state) => state.loadHistoryGame);
+  const deleteHistoryGame = useGameStore((state) => state.deleteHistoryGame);
+  const summary = useMemo(() => computeSettlement(archivedGame.snapshot), [archivedGame]);
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Eye className="h-4 w-4" />
+          View
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{archivedGame.snapshot.game.name.trim() || "Untitled Game"}</DialogTitle>
+          <DialogDescription>
+            Saved {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(archivedGame.savedAt))}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5">
+          <SummaryStats
+            summary={summary}
+            currency={archivedGame.snapshot.game.currency}
+            inputMode={archivedGame.snapshot.game.inputMode}
+            settlementMode={archivedGame.snapshot.game.settlementMode}
+          />
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Settlement</h3>
+            {summary.settlements.length === 0 ? (
+              <div className="rounded-[24px] border border-white/10 bg-black/15 p-4 text-sm text-muted-foreground">
+                Everyone was already settled.
+              </div>
+            ) : (
+              summary.settlements.map((transaction) => (
+                <div key={transaction.id} className="rounded-[24px] border border-white/10 bg-black/15 p-4">
+                  <div className="text-white">
+                    {transaction.fromName} pays {transaction.toName}
+                  </div>
+                  <div className="mt-1 text-sm text-emerald-100">
+                    {formatCurrency(transaction.amount, archivedGame.snapshot.game.currency)}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Players</h3>
+            {summary.playerBreakdown.map((player) => (
+              <div key={player.playerId} className="rounded-[24px] border border-white/10 bg-black/15 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-white">{player.name}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      Cash in {formatCurrency(player.cashIn, archivedGame.snapshot.game.currency)} • Final value {formatCurrency(player.finalValue, archivedGame.snapshot.game.currency)}
+                    </div>
+                  </div>
+                  <Badge className={cn(player.net >= 0 ? "text-emerald-100" : "text-rose-100")}>
+                    {player.net >= 0 ? "+" : ""}
+                    {formatCurrency(player.net, archivedGame.snapshot.game.currency)}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => loadHistoryGame(archivedGame.id)}>
+              Load Into Active Game
+            </Button>
+            <Button variant="ghost" onClick={() => deleteHistoryGame(archivedGame.id)}>
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -233,6 +346,10 @@ function PokerRoomApp() {
   const store = useGameStore();
   const [step, setStep] = useState(0);
   const [copied, setCopied] = useState(false);
+  const hasActiveContent =
+    store.game.name.trim().length > 0 ||
+    store.players.length > 0 ||
+    store.completedSettlementKeys.length > 0;
   const issues = validateGameState(store);
   const summary = useMemo(
     () =>
@@ -245,8 +362,23 @@ function PokerRoomApp() {
             completedSettlementKeys: store.completedSettlementKeys
           })
         : null,
-    [issues.length, store.bankPlayerId, store.buyInRules, store.game, store.players]
+    [issues.length, store.bankPlayerId, store.buyInRules, store.completedSettlementKeys, store.game, store.players]
   );
+
+  function archiveAndStartFresh() {
+    if (!hasActiveContent) {
+      startFreshWithoutSaving();
+      return;
+    }
+    store.saveCurrentGameToHistory();
+    store.resetGame();
+    setStep(0);
+  }
+
+  function startFreshWithoutSaving() {
+    store.resetGame();
+    setStep(0);
+  }
 
   async function copySummary() {
     if (!summary) {
@@ -296,6 +428,16 @@ function PokerRoomApp() {
                 <Stat label="Rules" value={String(store.buyInRules.length)} />
                 <Stat label="Mode" value={store.game.inputMode === "chips" ? "Chips" : "Cash"} />
               </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={archiveAndStartFresh}>
+                <History className="h-4 w-4" />
+                Save & New Game
+              </Button>
+              <Button variant="ghost" onClick={startFreshWithoutSaving}>
+                <RotateCcw className="h-4 w-4" />
+                Start Fresh
+              </Button>
             </div>
             <div className="grid gap-2 md:grid-cols-6">
               {steps.map((label, index) => (
@@ -585,9 +727,13 @@ function PokerRoomApp() {
                       <Share2 className="h-4 w-4" />
                       Share
                     </Button>
-                    <Button variant="ghost" onClick={() => store.resetGame()}>
+                    <Button variant="ghost" onClick={startFreshWithoutSaving}>
                       <RotateCcw className="h-4 w-4" />
-                      New game
+                      Start fresh
+                    </Button>
+                    <Button variant="ghost" onClick={archiveAndStartFresh} disabled={!summary}>
+                      <History className="h-4 w-4" />
+                      Save & New Game
                     </Button>
                   </div>
                 </div>
@@ -656,6 +802,33 @@ function PokerRoomApp() {
                 <MiniStat label="Currency" value={store.game.currency} />
                 <MiniStat label="Mode" value={store.game.settlementMode === "peer" ? "Peer-to-peer" : "Bank"} />
                 <MiniStat label="Input" value={store.game.inputMode === "chips" ? "Chips remaining" : "Cash taken"} />
+              </div>
+            </Card>
+
+            <Card>
+              <CardTitle>Game History</CardTitle>
+              <CardDescription className="mt-1">Archive finished tables, review them separately, or load one back into the active game.</CardDescription>
+              <div className="mt-4 space-y-3">
+                {store.gameHistory.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/15 px-4 py-3 text-sm text-muted-foreground">
+                    No saved games yet.
+                  </div>
+                ) : (
+                  store.gameHistory.map((archivedGame) => (
+                    <div key={archivedGame.id} className="rounded-[24px] border border-white/10 bg-black/15 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-white">{archivedGame.snapshot.game.name.trim() || "Untitled Game"}</div>
+                          <div className="mt-1 text-sm text-muted-foreground">
+                            {archivedGame.snapshot.players.length} players • {archivedGame.snapshot.game.currency} •{" "}
+                            {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(archivedGame.savedAt))}
+                          </div>
+                        </div>
+                        <GameHistoryDialog archivedGame={archivedGame} />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </Card>
 

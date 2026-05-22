@@ -43,6 +43,12 @@ export type GameState = {
   completedSettlementKeys: string[];
 };
 
+export type ArchivedGame = {
+  id: string;
+  savedAt: string;
+  snapshot: GameState;
+};
+
 export type PlayerComputed = {
   playerId: string;
   name: string;

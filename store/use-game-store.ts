@@ -4,9 +4,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { createId } from "@/lib/id";
-import { BuyInRule, GameState, Player, SettlementInputMode, SettlementMode } from "@/lib/types";
+import { ArchivedGame, BuyInRule, GameState, SettlementInputMode, SettlementMode } from "@/lib/types";
 
 type GameStore = GameState & {
+  gameHistory: ArchivedGame[];
   setGameMeta: (payload: Partial<GameState["game"]>) => void;
   addRule: (rule: Omit<BuyInRule, "id">) => void;
   updateRule: (id: string, rule: Omit<BuyInRule, "id">) => void;
@@ -20,6 +21,9 @@ type GameStore = GameState & {
   setExitValue: (playerId: string, value: number | undefined) => void;
   setBankPlayerId: (playerId: string | null) => void;
   toggleSettlementComplete: (key: string) => void;
+  saveCurrentGameToHistory: () => void;
+  deleteHistoryGame: (id: string) => void;
+  loadHistoryGame: (id: string) => void;
   resetGame: () => void;
 };
 
@@ -38,6 +42,19 @@ const initialGame = (): GameState => ({
   bankPlayerId: null,
   completedSettlementKeys: []
 });
+
+function cloneGameState(state: GameState): GameState {
+  return {
+    game: { ...state.game },
+    buyInRules: state.buyInRules.map((rule) => ({ ...rule })),
+    players: state.players.map((player) => ({
+      ...player,
+      buyIns: player.buyIns.map((entry) => ({ ...entry }))
+    })),
+    bankPlayerId: state.bankPlayerId,
+    completedSettlementKeys: [...state.completedSettlementKeys]
+  };
+}
 
 function updateArrayOrder<T extends { id: string }>(items: T[], id: string, direction: "up" | "down") {
   const index = items.findIndex((item) => item.id === id);
@@ -59,6 +76,7 @@ export const useGameStore = create<GameStore>()(
   persist(
     (set) => ({
       ...initialGame(),
+      gameHistory: [],
       setGameMeta: (payload) =>
         set((state) => ({
           game: {
@@ -177,7 +195,31 @@ export const useGameStore = create<GameStore>()(
               : [...state.completedSettlementKeys, key]
           };
         }),
-      resetGame: () => set(initialGame())
+      saveCurrentGameToHistory: () =>
+        set((state) => ({
+          gameHistory: [
+            {
+              id: createId("history"),
+              savedAt: new Date().toISOString(),
+              snapshot: cloneGameState(state)
+            },
+            ...state.gameHistory
+          ]
+        })),
+      deleteHistoryGame: (id) =>
+        set((state) => ({
+          gameHistory: state.gameHistory.filter((game) => game.id !== id)
+        })),
+      loadHistoryGame: (id) =>
+        set((state) => {
+          const archivedGame = state.gameHistory.find((game) => game.id === id);
+          if (!archivedGame) {
+            return state;
+          }
+
+          return cloneGameState(archivedGame.snapshot);
+        }),
+      resetGame: () => set((state) => ({ ...initialGame(), gameHistory: state.gameHistory }))
     }),
     {
       name: "poker-room-game"
